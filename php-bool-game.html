@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>$bool — PHP Boolean Game</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700;800&family=Share+Tech+Mono&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --green: #00ff88;
+    --red: #ff3c5a;
+    --blue: #3cf0ff;
+    --yellow: #ffe94d;
+    --dim: #1a1a1a;
+    --bg: #0a0a0a;
+  }
+
+  body {
+    background: var(--bg);
+    color: #fff;
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.07) 2px,
+      rgba(0,0,0,0.07) 4px
+    );
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  /* CRT flicker */
+  @keyframes flicker {
+    0%,100% { opacity: 1; }
+    92% { opacity: 1; }
+    93% { opacity: 0.85; }
+    94% { opacity: 1; }
+  }
+  body { animation: flicker 8s infinite; }
+
+  /* Grid bg */
+  .grid-bg {
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  /* Corner decorations */
+  .corner {
+    position: fixed;
+    width: 60px; height: 60px;
+    border-color: rgba(0,255,136,0.3);
+    border-style: solid;
+    border-width: 0;
+  }
+  .corner.tl { top: 20px; left: 20px; border-top-width: 2px; border-left-width: 2px; }
+  .corner.tr { top: 20px; right: 20px; border-top-width: 2px; border-right-width: 2px; }
+  .corner.bl { bottom: 20px; left: 20px; border-bottom-width: 2px; border-left-width: 2px; }
+  .corner.br { bottom: 20px; right: 20px; border-bottom-width: 2px; border-right-width: 2px; }
+
+  /* Step counter */
+  .step-counter {
+    position: fixed;
+    top: 24px; right: 90px;
+    font-size: 11px;
+    color: rgba(0,255,136,0.4);
+    letter-spacing: 0.15em;
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  /* Progress bar */
+  .progress-bar {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 300px;
+    height: 3px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.4s;
+  }
+  .progress-bar.visible { opacity: 1; }
+  .progress-fill {
+    height: 100%;
+    background: var(--green);
+    width: 0%;
+    transition: width linear;
+    box-shadow: 0 0 8px var(--green);
+  }
+
+  /* Main stage */
+  #stage {
+    text-align: center;
+    position: relative;
+    z-index: 10;
+    padding: 20px;
+    max-width: 900px;
+    width: 100%;
+  }
+
+  /* Label above code */
+  .label {
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.2);
+    margin-bottom: 28px;
+    font-family: 'Share Tech Mono', monospace;
+    opacity: 0;
+    transition: opacity 0.5s;
+  }
+  .label.show { opacity: 1; }
+
+  /* The code line */
+  .code-line {
+    font-size: clamp(28px, 6vw, 64px);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+    transition: all 0.3s;
+    white-space: nowrap;
+  }
+
+  .keyword   { color: #ff79c6; }
+  .variable  { color: var(--blue); }
+  .operator  { color: var(--yellow); }
+  .bool-true { color: var(--green); }
+  .bool-false{ color: var(--red); }
+  .func      { color: #bd93f9; }
+  .string    { color: #f1fa8c; }
+  .neutral   { color: rgba(255,255,255,0.55); }
+
+  /* Value pill hidden — students must track it themselves */
+  .value-pill { display: none; }
+
+  /* Animations */
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(24px); filter: blur(4px); }
+    to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
+  }
+  @keyframes slideOut {
+    from { opacity: 1; transform: translateY(0);     filter: blur(0); }
+    to   { opacity: 0; transform: translateY(-24px); filter: blur(4px); }
+  }
+  @keyframes pulseGreen {
+    0%,100% { text-shadow: 0 0 20px rgba(0,255,136,0.3); }
+    50%      { text-shadow: 0 0 40px rgba(0,255,136,0.7), 0 0 80px rgba(0,255,136,0.3); }
+  }
+  @keyframes pulseRed {
+    0%,100% { text-shadow: 0 0 20px rgba(255,60,90,0.3); }
+    50%      { text-shadow: 0 0 40px rgba(255,60,90,0.7), 0 0 80px rgba(255,60,90,0.3); }
+  }
+  @keyframes revealFinal {
+    0%   { opacity: 0; transform: scale(0.7); filter: blur(20px); }
+    60%  { opacity: 1; transform: scale(1.05); filter: blur(0); }
+    100% { opacity: 1; transform: scale(1); filter: blur(0); }
+  }
+  @keyframes typeIn {
+    from { clip-path: inset(0 100% 0 0); }
+    to   { clip-path: inset(0 0% 0 0); }
+  }
+  @keyframes blink {
+    0%,100% { opacity: 1; } 50% { opacity: 0; }
+  }
+
+  .anim-in  { animation: slideIn  0.45s cubic-bezier(0.16,1,0.3,1) forwards; }
+  .anim-out { animation: slideOut 0.35s cubic-bezier(0.4,0,1,1) forwards; }
+
+  /* Guess phase */
+  #guess-phase {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    position: relative;
+    z-index: 10;
+  }
+  #guess-phase.active { display: flex; }
+
+  .guess-prompt {
+    font-size: clamp(14px, 2.5vw, 18px);
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 0.15em;
+    font-family: 'Share Tech Mono', monospace;
+    text-transform: uppercase;
+  }
+
+  .guess-buttons {
+    display: flex;
+    gap: 24px;
+  }
+
+  .guess-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(22px, 4vw, 42px);
+    font-weight: 800;
+    padding: 16px 48px;
+    border: 2px solid;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .guess-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .guess-btn:hover::before { opacity: 1; }
+  .guess-btn:active { transform: scale(0.96); }
+
+  .btn-true  { color: var(--green); border-color: var(--green); }
+  .btn-true::before  { background: rgba(0,255,136,0.08); }
+  .btn-true:hover  { box-shadow: 0 0 30px rgba(0,255,136,0.3), inset 0 0 20px rgba(0,255,136,0.05); }
+
+  .btn-false { color: var(--red);   border-color: var(--red); }
+  .btn-false::before { background: rgba(255,60,90,0.08); }
+  .btn-false:hover { box-shadow: 0 0 30px rgba(255,60,90,0.3), inset 0 0 20px rgba(255,60,90,0.05); }
+
+  /* Result reveal */
+  #result-phase {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    position: relative;
+    z-index: 10;
+  }
+  #result-phase.active { display: flex; }
+
+  .result-label {
+    font-size: 12px;
+    letter-spacing: 0.35em;
+    color: rgba(255,255,255,0.2);
+    text-transform: uppercase;
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  .result-value {
+    font-size: clamp(60px, 15vw, 130px);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    animation: revealFinal 0.8s cubic-bezier(0.16,1,0.3,1) forwards;
+  }
+  .result-true  { color: var(--green); animation-name: revealFinal; text-shadow: 0 0 60px rgba(0,255,136,0.5); }
+  .result-false { color: var(--red);   animation-name: revealFinal; text-shadow: 0 0 60px rgba(255,60,90,0.5); }
+
+  .result-verdict {
+    font-size: clamp(12px, 2vw, 15px);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    font-family: 'Share Tech Mono', monospace;
+    margin-top: 4px;
+  }
+  .verdict-correct { color: var(--green); }
+  .verdict-wrong   { color: var(--red); }
+
+  .play-again {
+    margin-top: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 12px 32px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: transparent;
+    color: rgba(255,255,255,0.4);
+    cursor: pointer;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    transition: all 0.25s;
+  }
+  .play-again:hover {
+    color: #fff;
+    border-color: rgba(255,255,255,0.4);
+    background: rgba(255,255,255,0.04);
+  }
+
+  /* Cursor blink */
+  .cursor {
+    display: inline-block;
+    width: 3px;
+    height: 0.85em;
+    background: currentColor;
+    margin-left: 4px;
+    vertical-align: middle;
+    animation: blink 1s step-end infinite;
+    opacity: 0.7;
+  }
+
+  /* Blackout */
+  #blackout {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.8s;
+  }
+  #blackout.on { opacity: 1; pointer-events: all; }
+  .blackout-text {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.3em;
+    color: rgba(255,255,255,0.07);
+    text-transform: uppercase;
+    animation: blink 2s ease-in-out infinite;
+  }
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<div class="corner tl"></div>
+<div class="corner tr"></div>
+<div class="corner bl"></div>
+<div class="corner br"></div>
+<div class="step-counter" id="stepCounter"></div>
+
+<!-- Main game stage -->
+<div id="stage">
+  <div class="label" id="codeLabel">EXECUTE</div>
+  <div class="code-line" id="codeLine"></div>
+
+  <div class="value-pill" id="valuePill">
+    <span class="pill-dot"></span>
+    <span id="pillText"></span>
+  </div>
+</div>
+
+<!-- Guess phase -->
+<div id="guess-phase">
+  <div class="guess-prompt">What is <span style="color:var(--blue)">$bool</span> now?</div>
+  <div class="guess-buttons">
+    <button class="guess-btn btn-true"  onclick="submitGuess(true)">true</button>
+    <button class="guess-btn btn-false" onclick="submitGuess(false)">false</button>
+  </div>
+</div>
+
+<!-- Result phase -->
+<div id="result-phase">
+  <div class="result-label">$bool =</div>
+  <div class="result-value" id="resultValue"></div>
+  <div class="result-verdict" id="resultVerdict"></div>
+  <button class="play-again" onclick="startGame()">▶ play again</button>
+</div>
+
+<!-- Progress bar -->
+<div class="progress-bar" id="progressBar">
+  <div class="progress-fill" id="progressFill"></div>
+</div>
+
+<!-- Blackout overlay -->
+<div id="blackout">
+  <div class="blackout-text">processing...</div>
+</div>
+
+<script>
+// ─── Instruction templates ───────────────────────────────────────────────────
+
+const TOGGLE_INSTRUCTIONS = [
+  { html: `<span class="variable">$bool</span> <span class="operator">=</span> <span class="operator">!</span><span class="variable">$bool</span><span class="neutral">;</span>`,
+    effect: 'toggle' },
+];
+
+const NOOP_INSTRUCTIONS = [
+  { html: `<span class="func">echo</span> <span class="variable">$bool</span><span class="neutral">;</span>`,
+    effect: 'noop' },
+  { html: `<span class="func">var_dump</span><span class="neutral">(</span><span class="variable">$bool</span><span class="neutral">);</span>`,
+    effect: 'noop' },
+  { html: `<span class="variable">$x</span> <span class="operator">=</span> <span class="variable">$bool</span><span class="neutral">;</span>`,
+    effect: 'noop' },
+  { html: `<span class="func">print</span><span class="neutral">(</span><span class="variable">$bool</span><span class="neutral">);</span>`,
+    effect: 'noop' },
+];
+
+function makeSetInstruction(value) {
+  return { html: `<span class="variable">$bool</span> <span class="operator">=</span> <span class="${value ? 'bool-true' : 'bool-false'}">${value}</span><span class="neutral">;</span>`,
+    effect: 'set', value };
+}
+
+// ─── Game state ───────────────────────────────────────────────────────────────
+let boolValue = true;
+let sequence = [];
+let step = 0;
+let timer = null;
+let progressTimer = null;
+let playerGuess = null;
+const TOTAL_STEPS = 12;
+const STEP_DURATION = 5000;
+const BLACKOUT_DURATION = 12000;
+
+// ─── Shuffle ──────────────────────────────────────────────────────────────────
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ─── Build a diverse sequence ─────────────────────────────────────────────────
+function buildSequence() {
+  // Build first 8 steps (may include sets) and last 4 (toggle/noop only)
+  const earlyPool = [];
+  for (let i = 0; i < 6; i++) earlyPool.push({ effect: 'toggle' });
+  earlyPool.push({ effect: 'set', value: true });
+  earlyPool.push({ effect: 'set', value: false });
+  earlyPool.push({ effect: 'set', value: true });
+  earlyPool.push({ effect: 'set', value: false });
+  for (let i = 0; i < 4; i++) earlyPool.push({ effect: 'noop_pick' });
+
+  const latePool = [];
+  for (let i = 0; i < 4; i++) latePool.push({ effect: 'toggle' });
+  for (let i = 0; i < 3; i++) latePool.push({ effect: 'noop_pick' });
+
+  const early = shuffle(earlyPool).slice(0, 8);
+  const late  = shuffle(latePool).slice(0, 4);
+  const seq   = [...early, ...late];
+
+  // Fix: no two consecutive noops
+  for (let i = 1; i < seq.length; i++) {
+    if (seq[i].effect === 'noop_pick' && seq[i-1].effect === 'noop_pick') {
+      seq[i] = { effect: 'toggle' };
+    }
+  }
+  return seq;
+}
+
+// Track last noop used to avoid identical consecutive noops (extra safety)
+let lastNoopIndex = -1;
+
+function resolveStep(stepDef) {
+  if (stepDef.effect === 'toggle') {
+    return { ...TOGGLE_INSTRUCTIONS[0] };
+  }
+  if (stepDef.effect === 'noop_pick') {
+    // Pick a noop different from the last one shown
+    let idx;
+    do { idx = Math.floor(Math.random() * NOOP_INSTRUCTIONS.length); }
+    while (idx === lastNoopIndex && NOOP_INSTRUCTIONS.length > 1);
+    lastNoopIndex = idx;
+    return { ...NOOP_INSTRUCTIONS[idx] };
+  }
+  if (stepDef.effect === 'set') {
+    return makeSetInstruction(stepDef.value);
+  }
+}
+
+// ─── DOM helpers ─────────────────────────────────────────────────────────────
+const stage       = document.getElementById('stage');
+const codeLine    = document.getElementById('codeLine');
+const hint        = document.getElementById('hint');
+const valuePill   = document.getElementById('valuePill');
+const pillText    = document.getElementById('pillText');
+const codeLabel   = document.getElementById('codeLabel');
+const stepCounter = document.getElementById('stepCounter');
+const progressBar = document.getElementById('progressBar');
+const progressFill= document.getElementById('progressFill');
+const blackout    = document.getElementById('blackout');
+const guessPhase  = document.getElementById('guess-phase');
+const resultPhase = document.getElementById('result-phase');
+const resultValue = document.getElementById('resultValue');
+const resultVerdict = document.getElementById('resultVerdict');
+
+function showStage()  { stage.style.display = 'block'; guessPhase.classList.remove('active'); resultPhase.classList.remove('active'); }
+function showGuess()  { stage.style.display = 'none';  guessPhase.classList.add('active');    resultPhase.classList.remove('active'); }
+function showResult() { stage.style.display = 'none';  guessPhase.classList.remove('active'); resultPhase.classList.add('active'); }
+
+function setCodeLine(html) {
+  codeLine.classList.remove('anim-in');
+  codeLine.classList.add('anim-out');
+  setTimeout(() => {
+    codeLine.innerHTML = html;
+    codeLine.classList.remove('anim-out');
+    codeLine.classList.add('anim-in');
+  }, 340);
+}
+
+function updatePill(val) {
+  valuePill.className = 'value-pill show ' + (val ? 'true-pill' : 'false-pill');
+  pillText.textContent = '$bool = ' + val;
+}
+
+function startProgressBar() {
+  progressBar.classList.add('visible');
+  progressFill.style.transition = 'none';
+  progressFill.style.width = '0%';
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      progressFill.style.transition = `width ${STEP_DURATION}ms linear`;
+      progressFill.style.width = '100%';
+    });
+  });
+}
+
+function startGame() {
+  clearTimeout(timer);
+  clearTimeout(progressTimer);
+  blackout.classList.remove('on');
+
+  boolValue = true;
+  sequence = buildSequence();
+  step = 0;
+  playerGuess = null;
+  lastNoopIndex = -1;
+
+  showStage();
+  codeLabel.classList.add('show');
+
+  // Step 0: show initial assignment
+  setCodeLine(`<span class="variable">$bool</span> <span class="operator">=</span> <span class="bool-true">true</span><span class="neutral">;</span>`);
+  stepCounter.textContent = `STEP 0 / ${TOTAL_STEPS}`;
+  progressBar.classList.remove('visible');
+
+  timer = setTimeout(() => nextStep(), STEP_DURATION);
+}
+
+function nextStep() {
+  if (step >= TOTAL_STEPS) {
+    endSequence();
+    return;
+  }
+
+  const stepDef = sequence[step];
+  const instruction = resolveStep(stepDef);
+
+  // Apply effect
+  if (instruction.effect === 'toggle') boolValue = !boolValue;
+  else if (instruction.effect === 'set') boolValue = instruction.value;
+  // noop: no change
+
+  step++;
+  stepCounter.textContent = `STEP ${step} / ${TOTAL_STEPS}`;
+  setCodeLine(instruction.html);
+
+  startProgressBar();
+  timer = setTimeout(() => nextStep(), STEP_DURATION);
+}
+
+function endSequence() {
+  progressBar.classList.remove('visible');
+  stepCounter.textContent = '';
+  codeLabel.classList.remove('show');
+  showGuess();
+}
+
+function submitGuess(guess) {
+  playerGuess = guess;
+  const correct = guess === boolValue;
+
+  showResult();
+  resultValue.textContent = String(boolValue);
+  resultValue.className = 'result-value ' + (boolValue ? 'result-true' : 'result-false');
+  resultVerdict.textContent = correct ? '✓ correct!' : '✗ wrong — try again';
+  resultVerdict.className = 'result-verdict ' + (correct ? 'verdict-correct' : 'verdict-wrong');
+}
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+startGame();
+</script>
+</body>
+</html>
